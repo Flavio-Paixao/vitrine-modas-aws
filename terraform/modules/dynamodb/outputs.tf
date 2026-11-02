@@ -37,3 +37,23 @@ output "pedidos_table_arn" {
   description = "ARN da tabela de pedidos"
   value       = aws_dynamodb_table.pedidos.arn
 }
+
+output "categoria_index_name" {
+  description = "Nome do índice de produtos por categoria"
+  value       = local.categoria_index
+}
+
+output "pedidos_cliente_index_name" {
+  description = "Nome do índice de pedidos por cliente"
+  value       = local.cliente_index
+}
+
+output "pedidos_cliente_index_arn" {
+  description = "ARN do índice de pedidos por cliente"
+  value       = "${aws_dynamodb_table.pedidos.arn}/index/${local.cliente_index}"
+}
+
+output "produtos_categoria_index_arn" {
+  description = "ARN do índice de produtos por categoria"
+  value       = "${aws_dynamodb_table.produtos.arn}/index/${local.categoria_index}"
+}

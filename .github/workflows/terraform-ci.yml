@@ -90,3 +90,23 @@ jobs:
       # Cada skip aponta para a decisão correspondente em docs/DECISIONS.md.
       - name: checkov
         run: checkov -d . --framework terraform --quiet --compact
+
+  python:
+    name: python (testes das Lambdas)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências de teste
+        run: pip install -r requirements-dev.txt
+
+      # moto simula o DynamoDB na memória: nenhum teste toca a AWS de verdade
+      - name: pytest
+        run: pytest -q tests
