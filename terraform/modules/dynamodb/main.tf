@@ -123,6 +123,10 @@ resource "aws_dynamodb_table" "pedidos" {
     projection_type = "ALL"
   }
 
+  # Stream: cada pedido novo vira o evento PedidoCriado (Fase 4)
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
+
   point_in_time_recovery {
     enabled = true
   }

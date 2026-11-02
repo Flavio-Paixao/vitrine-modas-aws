@@ -51,3 +51,8 @@ output "api_invoke_url" {
   description = "URL base da API (stage incluído)"
   value       = module.api.invoke_url
 }
+
+output "alertas_topic_arn" {
+  description = "ARN do tópico SNS de alertas"
+  value       = module.eventos.alertas_topic_arn
+}

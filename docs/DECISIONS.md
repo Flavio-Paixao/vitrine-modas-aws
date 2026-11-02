@@ -9,8 +9,9 @@ Projeto de estudo, validado com `terraform validate` e `terraform plan`. Nada fo
 4. DynamoDB
 5. Cognito
 6. Lambdas e API Gateway
-7. Mudanças em relação ao Seguros Horizonte
-8. Serviços que não usei
+7. Eventos: EventBridge, SQS e SNS
+8. Mudanças em relação ao Seguros Horizonte
+9. Serviços que não usei
 
 ## 1. Base do projeto
 
@@ -148,7 +149,33 @@ O stage limita a 100 requisições por segundo, com rajada de 200. Esses valores
 ### 6.10 Testes com moto
 As três funções têm testes (`pytest` + `moto`) que simulam o DynamoDB na memória: permissões por grupo, preço vindo do catálogo, estoque nunca negativo e pedidos isolados por cliente. Os testes provam a lógica do código, mas não provam as permissões IAM, a key policy do KMS nem a integração com o API Gateway; isso só um `apply` mostraria, e este projeto não faz `apply`.
 
-## 7. Mudanças em relação ao Seguros Horizonte
+## 7. Eventos: EventBridge, SQS e SNS
+
+### 7.1 Barramento de eventos próprio no EventBridge
+Quem produz o evento (o publicador) não sabe quem vai consumi-lo: as regras ligam o tipo de evento ao destino. Assim, incluir um consumidor novo não exige mexer no produtor. Alternativas: publicar direto no SNS (simples, mas com filtros mais limitados) ou ligar o stream direto à Lambda consumidora (acopla o consumidor ao formato da tabela). Abro mão da simplicidade de uma chamada direta.
+
+### 7.2 Um publicador traduz os streams em eventos de negócio
+Uma Lambda lê os streams de `produtos`, `estoque` e `pedidos` e publica `ProdutoAlterado`, `ProdutoRemovido`, `EstoqueAlterado`, `EstoqueBaixo` e `PedidoCriado`. O EventBridge Pipes faria parte disso sem código, mas a regra de negócio (por exemplo, só avisar ao cruzar o limite) fica mais clara e testável em Python. Mudar o status de um pedido (MODIFY) não gera evento, para não criar um laço.
+
+### 7.3 Entrega pelo menos uma vez e falhas de stream
+Streams, EventBridge e SQS entregam pelo menos uma vez, então o mesmo evento pode chegar duas vezes e a ordem não é garantida. Por isso o consumidor é idempotente (7.5). Nos mapeamentos de stream, um lote que falha é dividido ao meio e tentado até 3 vezes; depois disso o lote é descartado, porque não configurei destino de falha. É uma limitação consciente: em produção eu adicionaria uma fila de falhas para os streams.
+
+### 7.4 Chave KMS própria para o tópico SNS
+O tópico de alertas usa uma chave KMS própria (`messaging`). Para o EventBridge, os alarmes do CloudWatch e o AWS Budgets publicarem num tópico cifrado, a key policy precisa liberar esses serviços, e restrinjo com `aws:SourceAccount` para só valer para esta conta. Isso só é exercitado de verdade num `apply`, que este projeto não faz; o `plan` não prova que essa política funciona. As filas SQS usam a criptografia gerenciada pelo SQS (SSE-SQS), que dispensa chave e política: abro mão da trilha de auditoria de uma chave própria nas filas.
+
+### 7.5 Fila de pedidos com DLQ e confirmação idempotente
+A regra `PedidoCriado` envia para a fila `pedidos-processar`. A Lambda `processador` confirma o pedido (`CRIADO` para `CONFIRMADO`) com uma condição, então processar a mesma mensagem duas vezes não causa erro nem efeito duplo. Falhas devolvem só as mensagens com erro (`ReportBatchItemFailures`); depois de 3 tentativas a mensagem vai para a DLQ, que guarda 14 dias. O tempo de visibilidade (60 s) é seis vezes o timeout da função (10 s). A concorrência fica limitada a 5 para o consumidor não sobrecarregar a tabela.
+
+### 7.6 Alertas por SNS, com e-mail opcional e fora do código
+O alerta de estoque baixo vai para um tópico SNS. A assinatura por e-mail só existe se a variável `alert_email` for informada, na sua máquina; o e-mail nunca entra no código nem no commit.
+
+### 7.7 Alerta de estoque só ao cruzar o limite
+`EstoqueBaixo` é emitido quando a quantidade passa de acima para igual ou abaixo do limite (padrão 3), e não a cada venda abaixo dele. Evita encher a caixa de alertas; o custo é que, se o alerta for perdido, não há repetição.
+
+### 7.8 O que o "processamento" do pedido é e não é
+Nesta fase o processador apenas confirma o pedido. Não há pagamento, nota fiscal nem envio: o objetivo é mostrar o desenho assíncrono (evento, fila, consumidor idempotente, DLQ), e não simular um fluxo comercial completo.
+
+## 8. Mudanças em relação ao Seguros Horizonte
 
 | Item | Case 1 | Case 2 |
 |---|---|---|
@@ -162,10 +189,12 @@ As três funções têm testes (`pytest` + `moto`) que simulam o DynamoDB na mem
 | CI | fmt, validate, tflint, checkov | + testes Python (pytest com moto) |
 | Módulos networking, ec2, rds | usados | não usados |
 
-## 8. Serviços que não usei
+## 9. Serviços que não usei
 
 - **RDS/Aurora:** acesso por chave e escala imprevisível combinam com DynamoDB; abro mão de joins e SQL ad hoc.
 - **ElastiCache:** DynamoDB já responde em milissegundos; DAX seria a opção se a latência de leitura virasse problema.
 - **EC2/ALB/Auto Scaling, ECS/EKS:** sem servidor para manter; abro mão de controle do runtime e aceito cold start.
-- **Step Functions e Kinesis:** o fluxo de pedido é simples e SQS/EventBridge bastam.
+- **Step Functions:** o fluxo de pedido é simples e SQS/EventBridge bastam; entraria se houvesse várias etapas com compensação.
+- **SQS FIFO e Kinesis:** não preciso de ordem estrita nem de streaming de alto volume; a fila padrão com consumidor idempotente basta (DECISIONS 7.3).
+- **EventBridge Pipes:** faria a ponte stream para barramento sem código, mas a regra de negócio fica mais clara na Lambda (DECISIONS 7.2).
 - **HTTP API do API Gateway:** mais barata e simples, mas sem authorizer Cognito nativo nem limites por método (DECISIONS 6.7).
