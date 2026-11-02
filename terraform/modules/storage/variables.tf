@@ -20,3 +20,9 @@ variable "frontend_noncurrent_retention_days" {
   type        = number
   default     = 30
 }
+
+variable "frontend_extra_policy_json" {
+  description = "Policy JSON extra do bucket do front-end (ex.: leitura pelo CloudFront), combinada com a de TLS"
+  type        = string
+  default     = null
+}

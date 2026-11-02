@@ -144,6 +144,9 @@ locals {
 data "aws_iam_policy_document" "tls_only" {
   for_each = local.buckets
 
+  # Um bucket só tem UMA policy: a do CloudFront entra aqui, junto com a de TLS (DECISIONS 8.3)
+  source_policy_documents = each.key == "frontend" && var.frontend_extra_policy_json != null ? [var.frontend_extra_policy_json] : []
+
   statement {
     sid     = "NegarTrafegoSemTLS"
     effect  = "Deny"
@@ -167,8 +170,6 @@ data "aws_iam_policy_document" "tls_only" {
   }
 }
 
-# Atenção (Fase 5): um bucket só tem UMA bucket policy. Quando o CloudFront precisar de acesso
-# ao front-end, a policy dele deve ser combinada com esta (source_policy_documents), não criada à parte.
 resource "aws_s3_bucket_policy" "tls_only" {
   for_each = local.buckets
 

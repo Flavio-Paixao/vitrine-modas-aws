@@ -15,6 +15,9 @@ module "storage" {
 
   project_name     = var.project_name
   logs_kms_key_arn = module.kms.s3_key_arn
+
+  # Fase 5: permite o CloudFront ler o front-end (definida em borda.tf)
+  frontend_extra_policy_json = data.aws_iam_policy_document.cloudfront_le_frontend.json
 }
 
 # ==========================================
