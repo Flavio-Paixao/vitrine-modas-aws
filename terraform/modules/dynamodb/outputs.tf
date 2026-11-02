@@ -57,3 +57,8 @@ output "produtos_categoria_index_arn" {
   description = "ARN do índice de produtos por categoria"
   value       = "${aws_dynamodb_table.produtos.arn}/index/${local.categoria_index}"
 }
+
+output "pedidos_stream_arn" {
+  description = "ARN do stream da tabela de pedidos (usado na Fase 4)"
+  value       = aws_dynamodb_table.pedidos.stream_arn
+}

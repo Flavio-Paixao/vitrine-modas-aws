@@ -153,6 +153,70 @@ data "aws_iam_policy_document" "s3_key" {
   }
 }
 
+data "aws_iam_policy_document" "messaging_key" {
+  #checkov:skip=CKV_AWS_111:Key policy: Resource * significa esta chave; restricao vem dos principals e conditions (DECISIONS 2.4)
+  #checkov:skip=CKV_AWS_356:Key policy: Resource * significa esta chave (DECISIONS 2.4)
+  statement {
+    sid       = "KeyAdministration"
+    effect    = "Allow"
+    actions   = local.key_admin_actions
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [local.account_root]
+    }
+  }
+
+  statement {
+    sid       = "UseOnlyThroughSNS"
+    effect    = "Allow"
+    actions   = local.key_usage_actions
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [local.account_root]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["sns.${local.region}.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:CallerAccount"
+      values   = [local.account_id]
+    }
+  }
+
+  # Serviços da AWS que PUBLICAM no tópico cifrado (EventBridge, alarmes do CloudWatch e
+  # AWS Budgets) precisam gerar chave de dados. Só valem para chamadas desta conta (DECISIONS 7.4).
+  statement {
+    sid       = "AllowServicesToPublish"
+    effect    = "Allow"
+    actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+    resources = ["*"]
+
+    principals {
+      type = "Service"
+      identifiers = [
+        "events.amazonaws.com",
+        "cloudwatch.amazonaws.com",
+        "budgets.amazonaws.com",
+      ]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
 # ==========================================
 # CHAVE DO DYNAMODB (usada na Fase 1)
 # ==========================================
@@ -191,4 +255,23 @@ resource "aws_kms_key" "s3" {
 resource "aws_kms_alias" "s3" {
   name          = "alias/${var.project_name}-s3"
   target_key_id = aws_kms_key.s3.key_id
+}
+
+# ==========================================
+# CHAVE DA MENSAGERIA (tópico SNS, Fase 4)
+# ==========================================
+resource "aws_kms_key" "messaging" {
+  description             = "Chave KMS do topico SNS de alertas (${var.project_name})"
+  deletion_window_in_days = var.deletion_window_in_days
+  enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.messaging_key.json
+
+  tags = {
+    Name = "${var.project_name}-messaging-key"
+  }
+}
+
+resource "aws_kms_alias" "messaging" {
+  name          = "alias/${var.project_name}-messaging"
+  target_key_id = aws_kms_key.messaging.key_id
 }

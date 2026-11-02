@@ -30,6 +30,7 @@ def ambiente(monkeypatch):
     monkeypatch.setenv("TABELA_PEDIDOS", "t-pedidos")
     monkeypatch.setenv("INDICE_CATEGORIA", "categoria-index")
     monkeypatch.setenv("INDICE_CLIENTE", "cliente-index")
+    monkeypatch.setenv("LIMITE_ESTOQUE_BAIXO", "3")
 
 
 @pytest.fixture

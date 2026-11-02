@@ -7,3 +7,8 @@ output "s3_key_arn" {
   description = "ARN da chave KMS do S3 (bucket de logs)"
   value       = aws_kms_key.s3.arn
 }
+
+output "messaging_key_arn" {
+  description = "ARN da chave KMS do tópico SNS de alertas"
+  value       = aws_kms_key.messaging.arn
+}
