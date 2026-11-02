@@ -1,3 +1,9 @@
+locals {
+  # Nomes dos índices, usados também pelas Lambdas (via outputs)
+  categoria_index = "categoria-index"
+  cliente_index   = "cliente-index"
+}
+
 # ==========================================
 # TABELA 1: PRODUTOS (catálogo)
 # ==========================================
@@ -25,7 +31,7 @@ resource "aws_dynamodb_table" "produtos" {
 
   # Índice para listar produtos de uma categoria, ordenados por nome (DECISIONS 4.3)
   global_secondary_index {
-    name            = "categoria-index"
+    name            = local.categoria_index
     hash_key        = "categoria"
     range_key       = "nome"
     projection_type = "ALL"
@@ -111,7 +117,7 @@ resource "aws_dynamodb_table" "pedidos" {
 
   # Índice para listar os pedidos de um cliente, do mais novo para o mais antigo
   global_secondary_index {
-    name            = "cliente-index"
+    name            = local.cliente_index
     hash_key        = "cliente_id"
     range_key       = "criado_em"
     projection_type = "ALL"

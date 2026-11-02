@@ -46,3 +46,8 @@ output "cognito_user_pool_client_id" {
   description = "ID do app client do front-end"
   value       = module.cognito.user_pool_client_id
 }
+
+output "api_invoke_url" {
+  description = "URL base da API (stage incluído)"
+  value       = module.api.invoke_url
+}

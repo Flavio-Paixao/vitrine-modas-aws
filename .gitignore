@@ -44,3 +44,8 @@ terraform.rc
 # planout
 # Saídas de plan (podem conter valores sensíveis)
 *tfplan*
+
+# Python (testes das Lambdas)
+.venv/
+__pycache__/
+.pytest_cache/

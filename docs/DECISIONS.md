@@ -8,8 +8,9 @@ Projeto de estudo, validado com `terraform validate` e `terraform plan`. Nada fo
 3. S3
 4. DynamoDB
 5. Cognito
-6. Mudanças em relação ao Seguros Horizonte
-7. Serviços que não usei (vai crescendo a cada fase)
+6. Lambdas e API Gateway
+7. Mudanças em relação ao Seguros Horizonte
+8. Serviços que não usei
 
 ## 1. Base do projeto
 
@@ -110,19 +111,61 @@ A Lambda da Fase 3 usará o grupo (claim `cognito:groups` no token) para decidir
 ### 5.7 Sem recursos de segurança avançada
 Detecção de credenciais vazadas e de login suspeito (plano de segurança avançada do Cognito) tem custo adicional e fica fora do escopo de estudo.
 
-## 6. Mudanças em relação ao Seguros Horizonte
+## 6. Lambdas e API Gateway
+
+### 6.1 Python 3.12 em arm64
+Python é a linguagem do case (e a mais pedida em automação na AWS). A arquitetura arm64 (Graviton) costuma custar menos por tempo de execução que x86; abro mão de bibliotecas com binários só para x86, que aqui não existem.
+
+### 6.2 Uma role por função, com mínimo privilégio
+`catalogo` lê e escreve só em `produtos`, `estoque` só em `estoque` e `pedidos` só nas três tabelas de que precisa, com os ARNs exatos das tabelas e dos índices. Todas também usam a chave KMS do DynamoDB, porque as tabelas são criptografadas com ela (a key policy só aceita o uso via DynamoDB). Mais roles dão mais trabalho que uma role compartilhada, mas se uma função for comprometida o estrago é menor. Isso melhora o que o Case 1 tinha (uma `lambda_role` genérica, DECISIONS 2.9 do Case 1).
+
+### 6.3 Configuração das funções e skips do checkov
+- Sem VPC: as funções só falam com serviços gerenciados pela AWS. Pôr Lambda em VPC traria ENIs e, sem NAT ou endpoints, perda de acesso aos serviços (`CKV_AWS_117`).
+- Sem DLQ: a invocação é síncrona, pela API; erro volta para quem chamou (`CKV_AWS_116`).
+- Sem concorrência reservada: reservar limitaria o pico da Black Friday (`CKV_AWS_115`).
+- Variáveis de ambiente só com nomes de tabelas, sem segredos (`CKV_AWS_173`).
+- Sem assinatura de código (`CKV_AWS_272`) e logs sem KMS próprio (`CKV_AWS_158`): ficam como evolução.
+- X-Ray ativo nas funções; logs com retenção de 365 dias.
+
+### 6.4 Catálogo com Scan limitado
+Listar sem filtro usa `Scan` com limite de 50 itens. Num catálogo pequeno de estudo é aceitável; em escala eu trocaria por um índice com chave fixa de listagem ou por paginação. Abro mão de eficiência por simplicidade.
+
+### 6.5 O preço vem sempre do catálogo
+O cliente envia produto, sku e quantidade; o preço é lido de `produtos` dentro da Lambda. Confiar no preço enviado pelo navegador permitiria comprar por qualquer valor.
+
+### 6.6 Pedido e baixa de estoque em uma transação
+O pedido usa `TransactWriteItems`: baixa o estoque de todos os itens com `ConditionExpression quantidade >= :q` e grava o pedido, tudo ou nada. Se um item não tem estoque, nada é baixado e a API responde 409. Duas compras do último item não passam as duas. Isso muda o escopo original: em vez de `carrinho/checkout` e `reserva-estoque`, ficam `catalogo`, `estoque` e `pedidos`. O carrinho vive no front-end até o checkout; guardá-lo no servidor exigiria mais uma tabela sem ganho para o estudo. A transação custa mais unidades de escrita que uma escrita simples.
+
+### 6.7 API REST com authorizer do Cognito
+O API Gateway valida o token antes de chamar a Lambda, então requisições sem token válido nem chegam nela. A checagem do grupo (`admin`) é feita na Lambda, lendo a claim `cognito:groups`. Escolhi a API REST (e não a HTTP API) porque ela tem authorizer Cognito nativo, limites por método e rastreamento X-Ray. Abro mão do preço menor e da configuração mais simples da HTTP API, que usaria um authorizer JWT.
+
+### 6.8 Rotas públicas, sem CORS e skips do checkov na API
+`GET` do catálogo e do estoque são públicos: a vitrine precisa ser navegável sem login (`CKV_AWS_59`). Tudo fica sob `/api`, para o CloudFront servir site e API no mesmo domínio na Fase 5, o que dispensa CORS. Por isso, chamar a API de outro domínio pelo navegador não funciona; para testar, use `curl`. Sem access log (exigiria a role de logs da conta, que é global), sem cache da API (o CloudFront cuida disso) e sem WAF (custo; recomendado em produção). Esses skips (`CKV_AWS_76`, `CKV_AWS_120`, `CKV_AWS_225`, `CKV2_AWS_4`, `CKV2_AWS_29`, `CKV2_AWS_51`, `CKV2_AWS_53`) apontam para esta seção.
+
+### 6.9 Limite de requisições por rota
+O stage limita a 100 requisições por segundo, com rajada de 200. Esses valores são configuração de estudo, não medição: protegem as funções e a conta contra abuso, mas podem barrar tráfego legítimo em um pico real e precisariam ser dimensionados com teste de carga.
+
+### 6.10 Testes com moto
+As três funções têm testes (`pytest` + `moto`) que simulam o DynamoDB na memória: permissões por grupo, preço vindo do catálogo, estoque nunca negativo e pedidos isolados por cliente. Os testes provam a lógica do código, mas não provam as permissões IAM, a key policy do KMS nem a integração com o API Gateway; isso só um `apply` mostraria, e este projeto não faz `apply`.
+
+## 7. Mudanças em relação ao Seguros Horizonte
+
 | Item | Case 1 | Case 2 |
 |---|---|---|
-| Chaves KMS | `rds`, `s3` | `dynamodb`, `s3` |
+| Chaves KMS | `rds`, `s3` | `dynamodb`, `s3` (+ `messaging` na Fase 4) |
 | ViaService | `rds`, `s3` | `dynamodb`, `s3` |
 | Buckets | app-data, backups, logs | frontend, logs |
 | Criptografia do bucket público | KMS | SSE-S3 |
 | Retenção de logs | 2555 dias (7 anos) | 365 dias (padrão) |
 | Padrão de `environment` | `prod` | `dev` |
+| Role da Lambda | uma genérica, sem função | uma por função, mínimo privilégio |
+| CI | fmt, validate, tflint, checkov | + testes Python (pytest com moto) |
 | Módulos networking, ec2, rds | usados | não usados |
 
-## 7. Serviços que não usei
+## 8. Serviços que não usei
+
 - **RDS/Aurora:** acesso por chave e escala imprevisível combinam com DynamoDB; abro mão de joins e SQL ad hoc.
 - **ElastiCache:** DynamoDB já responde em milissegundos; DAX seria a opção se a latência de leitura virasse problema.
 - **EC2/ALB/Auto Scaling, ECS/EKS:** sem servidor para manter; abro mão de controle do runtime e aceito cold start.
 - **Step Functions e Kinesis:** o fluxo de pedido é simples e SQS/EventBridge bastam.
+- **HTTP API do API Gateway:** mais barata e simples, mas sem authorizer Cognito nativo nem limites por método (DECISIONS 6.7).
