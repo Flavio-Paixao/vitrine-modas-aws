@@ -27,3 +27,8 @@ output "alertas_topic_arn" {
   description = "ARN do tópico de alertas"
   value       = aws_sns_topic.alertas.arn
 }
+
+output "pedidos_queue_name" {
+  description = "Nome da fila de pedidos (usado pelo dashboard da Fase 6)"
+  value       = aws_sqs_queue.pedidos.name
+}

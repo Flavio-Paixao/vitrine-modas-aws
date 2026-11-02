@@ -22,3 +22,8 @@ output "domain_name" {
   description = "Domínio regional da API (usado como origem do CloudFront na Fase 5)"
   value       = "${aws_api_gateway_rest_api.this.id}.execute-api.${data.aws_region.current.name}.amazonaws.com"
 }
+
+output "rest_api_name" {
+  description = "Nome da API (dimensão das métricas do CloudWatch)"
+  value       = aws_api_gateway_rest_api.this.name
+}

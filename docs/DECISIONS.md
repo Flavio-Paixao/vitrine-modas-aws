@@ -11,8 +11,9 @@ Projeto de estudo, validado com `terraform validate` e `terraform plan`. Nada fo
 6. Lambdas e API Gateway
 7. Eventos: EventBridge, SQS e SNS
 8. Borda: CloudFront e S3
-9. Mudanças em relação ao Seguros Horizonte
-10. Serviços que não usei
+9. Observabilidade: alarmes, dashboard, X-Ray e orçamento
+10. Mudanças em relação ao Seguros Horizonte
+11. Serviços que não usei
 
 ## 1. Base do projeto
 
@@ -202,7 +203,27 @@ As políticas de cache e de cabeçalhos são lidas pelo nome (`data` sources), e
 ### 8.8 A página inicial é uma demonstração
 O `index.html` listando o catálogo sai do Terraform (`aws_s3_object`) para o projeto ser completo. Num projeto real, o deploy do front-end seria um pipeline próprio, separado da infraestrutura. Nada disso foi implantado.
 
-## 9. Mudanças em relação ao Seguros Horizonte
+## 9. Observabilidade: alarmes, dashboard, X-Ray e orçamento
+
+### 9.1 Três tipos de alarme, todos para o tópico de alertas
+- **Erros por função Lambda:** 1 ou mais erros em 5 minutos (um alarme por função, cinco no total).
+- **Erros 5xx da API:** 5 ou mais em 5 minutos.
+- **DLQ de pedidos:** qualquer mensagem visível (um pedido que falhou 3 vezes e precisa de investigação).
+Os limites são valores de estudo, escolhidos por desenho, não calibrados com tráfego real. Dados ausentes contam como "sem problema" (`notBreaching`), porque uma loja com pouco tráfego não gera métrica a cada período. Os alarmes avisam o tópico SNS (e também quando voltam ao normal).
+
+### 9.2 Um dashboard de visão geral
+Um painel com invocações e erros das Lambdas, requisições e erros da API e o tamanho das filas. Serve para a primeira olhada num incidente; não substitui logs nem traços.
+
+### 9.3 X-Ray já ativo; aqui entra a amostragem
+O rastreamento está ligado nas funções e no stage da API desde a Fase 3. A regra de amostragem desta fase rastreia 1 requisição por segundo mais 5% do restante. Rastrear tudo custaria mais e teria pouco valor extra; o preço do X-Ray é por traço.
+
+### 9.4 Orçamento mensal com aviso antes de estourar
+Um orçamento de US$ 20 por mês, que avisa quando o gasto real passa de 80% e quando a previsão passa de 100%. O valor é de planejamento, não uma previsão de custo do projeto (o COST-ANALYSIS faz essa conta com hipóteses explícitas). O AWS Budgets avisa, mas não impede gasto. Este orçamento cobre a conta inteira; filtrar só este projeto exigiria ativar a tag `Project` como tag de alocação de custos.
+
+### 9.5 O que não cobri
+Alarmes de throttling do DynamoDB e de erros do CloudFront (as métricas do CloudFront ficam na região us-east-1, fora do provider deste projeto), logs estruturados, métricas customizadas, metas de disponibilidade (SLO) e testes de carga. Por isso este projeto não afirma nenhum número de latência, disponibilidade ou capacidade: nada disso foi medido.
+
+## 10. Mudanças em relação ao Seguros Horizonte
 
 | Item | Case 1 | Case 2 |
 |---|---|---|
@@ -216,7 +237,7 @@ O `index.html` listando o catálogo sai do Terraform (`aws_s3_object`) para o pr
 | CI | fmt, validate, tflint, checkov | + testes Python (pytest com moto) |
 | Módulos networking, ec2, rds | usados | não usados |
 
-## 10. Serviços que não usei
+## 11. Serviços que não usei
 
 - **RDS/Aurora:** acesso por chave e escala imprevisível combinam com DynamoDB; abro mão de joins e SQL ad hoc.
 - **ElastiCache:** DynamoDB já responde em milissegundos; DAX seria a opção se a latência de leitura virasse problema.
@@ -227,4 +248,5 @@ O `index.html` listando o catálogo sai do Terraform (`aws_s3_object`) para o pr
 - **Route 53 e ACM:** sem domínio próprio, o site usa o endereço `*.cloudfront.net` (DECISIONS 8.4).
 - **AWS WAF:** custo fora do escopo de estudo; seria a primeira proteção a adicionar em produção (DECISIONS 8.4).
 - **S3 website hosting:** exigiria bucket público; o CloudFront com OAC mantém o bucket privado (DECISIONS 8.3).
+- **CloudTrail, Config e GuardDuty:** controles da conta inteira, fora do escopo deste case; em produção eu os habilitaria (DECISIONS 9.5).
 - **HTTP API do API Gateway:** mais barata e simples, mas sem authorizer Cognito nativo nem limites por método (DECISIONS 6.7).
