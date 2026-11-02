@@ -6,8 +6,9 @@ Projeto de estudo, validado com `terraform validate` e `terraform plan`. Nada fo
 1. Base do projeto
 2. KMS
 3. S3
-4. Mudanças em relação ao Seguros Horizonte
-5. Serviços que não usei (vai crescendo a cada fase)
+4. DynamoDB
+5. Mudanças em relação ao Seguros Horizonte
+6. Serviços que não usei (vai crescendo a cada fase)
 
 ## 1. Base do projeto
 
@@ -60,7 +61,32 @@ Um bucket só tem uma bucket policy. Na Fase 5 a permissão do CloudFront (OAC) 
 ### 3.6 Sem replicação entre regiões, sem access logging, sem notificações de evento
 Por custo e por não terem consumidor neste projeto. Os skips `CKV_AWS_144`, `CKV_AWS_18` e `CKV2_AWS_62` apontam para esta seção.
 
-## 4. Mudanças em relação ao Seguros Horizonte
+## 4. DynamoDB
+
+### 4.1 Modo sob demanda (`PAY_PER_REQUEST`)
+O tráfego tem pico sazonal (Black Friday) e longos períodos baixos. No modo sob demanda não preciso dimensionar capacidade nem configurar auto scaling, e pago por requisição. Abro mão da previsibilidade de custo e de custo menor com carga alta e constante (nesse caso a capacidade provisionada compensaria). Os valores reais de custo ficam para o COST-ANALYSIS, calculados a partir de preços publicados, sem números de uso inventados.
+
+### 4.2 Três tabelas (produtos, estoque, pedidos), não single-table design
+Uma tabela por entidade deixa o modelo fácil de explicar e de testar. O single-table design reduziria o número de tabelas e de consultas em alguns padrões de acesso, mas é mais difícil de ler e de evoluir. Abro mão dessa otimização por clareza de estudo.
+
+### 4.3 Dois índices secundários globais (GSI)
+- `categoria-index` (produtos): lista produtos de uma categoria, ordenados por nome.
+- `cliente-index` (pedidos): lista os pedidos de um cliente por data de criação.
+Cada GSI replica os dados (`projection_type = ALL`) e consome escrita extra. Aceito esse custo porque as duas consultas são o caso de uso principal.
+
+### 4.4 Estoque por variação (`produto_id` + `sku`) e escrita condicional
+Cada tamanho/cor é uma linha. A consistência do estoque não vem do Terraform, e sim da Lambda da Fase 3, que vai decrementar com `ConditionExpression` (só baixa se `quantidade` for suficiente). Assim duas compras simultâneas do último item não passam as duas.
+
+### 4.5 Streams com `NEW_AND_OLD_IMAGES` em produtos e estoque
+O catálogo e o estoque mudam, e a Fase 4 vai reagir a essas mudanças (EventBridge). Guardar o item antes e depois permite saber o que mudou (por exemplo, preço antigo e novo). Pedidos não tem stream por enquanto.
+
+### 4.6 Chave KMS própria e recuperação pontual (PITR)
+As tabelas usam a chave `dynamodb` criada na Fase 0 (em vez da chave gerenciada pela AWS), e o PITR fica ligado para poder restaurar a qualquer momento dos últimos 35 dias. A política da chave só aceita uso via DynamoDB (DECISIONS 2.2 e 2.3). Isso só é exercitado de verdade em um `apply`, que este projeto não faz; o `plan` valida a configuração, mas não prova que a política da chave funciona com o DynamoDB.
+
+### 4.7 Sem TTL e sem proteção contra exclusão
+Não há dado que expire neste desenho, e o projeto não é implantado. Em produção, eu ligaria a proteção contra exclusão.
+
+## 5. Mudanças em relação ao Seguros Horizonte
 | Item | Case 1 | Case 2 |
 |---|---|---|
 | Chaves KMS | `rds`, `s3` | `dynamodb`, `s3` |
@@ -71,7 +97,7 @@ Por custo e por não terem consumidor neste projeto. Os skips `CKV_AWS_144`, `CK
 | Padrão de `environment` | `prod` | `dev` |
 | Módulos networking, ec2, rds | usados | não usados |
 
-## 5. Serviços que não usei
+## 6. Serviços que não usei
 - **RDS/Aurora:** acesso por chave e escala imprevisível combinam com DynamoDB; abro mão de joins e SQL ad hoc.
 - **ElastiCache:** DynamoDB já responde em milissegundos; DAX seria a opção se a latência de leitura virasse problema.
 - **EC2/ALB/Auto Scaling, ECS/EKS:** sem servidor para manter; abro mão de controle do runtime e aceito cold start.
