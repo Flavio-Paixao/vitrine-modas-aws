@@ -1,0 +1,78 @@
+# Decisões de arquitetura — Vitrine Modas
+
+Projeto de estudo, validado com `terraform validate` e `terraform plan`. Nada foi implantado (`apply` nunca é executado).
+
+## Sumário
+1. Base do projeto
+2. KMS
+3. S3
+4. Mudanças em relação ao Seguros Horizonte
+5. Serviços que não usei (vai crescendo a cada fase)
+
+## 1. Base do projeto
+
+### 1.1 State local, sem backend remoto
+Como o projeto nunca roda `apply`, não existe infraestrutura para guardar em state remoto. O `.gitignore` bloqueia `*.tfstate` e `*.tfvars`. Abro mão de praticar backend remoto (S3 com locking) neste case.
+
+### 1.2 Provider AWS `~> 5.20`
+Mesma versão do Case 1, para o código dos módulos adaptados continuar válido.
+
+### 1.3 `default_tags` no provider
+Tags de projeto, ambiente, dono e repositório aplicadas em todo recurso, sem repetir em cada módulo.
+
+### 1.4 `environment` com padrão `dev`
+No Case 1 o padrão era `prod`. Aqui o projeto não está implantado, então `dev` evita sugerir que existe um ambiente de produção.
+
+## 2. KMS
+
+### 2.1 Chaves próprias, uma por finalidade
+Uma chave para o DynamoDB e outra para o S3. Se uma for desativada ou comprometida, a outra não é afetada, e cada uma tem a sua trilha no CloudTrail.
+
+### 2.2 Key policy separando administrar de usar
+Herdado do Case 1 (3.3): a conta administra a chave, mas só criptografa/descriptografa quando a chamada vem pelo serviço certo (`kms:ViaService`) e desta conta (`kms:CallerAccount`).
+
+### 2.3 Grants só para recursos da AWS
+O DynamoDB cria grants para usar a chave em segundo plano. A condição `kms:GrantIsForAWSResource` impede grants para pessoas.
+
+### 2.4 `Resource = "*"` nas key policies (falso positivo do checkov)
+Numa key policy, `*` significa "esta chave". Os skips `CKV_AWS_111` e `CKV_AWS_356` apontam para esta seção.
+
+### 2.5 Chave de mensageria fica para a Fase 4
+SNS e SQS precisam de permissões de serviço na key policy (EventBridge, SNS). Cria-se a chave quando os recursos existirem, para não escrever uma policy sem poder testar o desenho.
+
+## 3. S3
+
+### 3.1 Dois buckets: front-end e logs
+O Case 1 tinha três (dados, backups, logs). Aqui os dados vivem no DynamoDB e não há banco para backup em S3.
+
+### 3.2 Front-end com SSE-S3 (AES256), sem KMS
+O conteúdo é público por natureza (será servido pelo CloudFront). Usar KMS exigiria ampliar a key policy para o CloudFront, que a policy herdada do Case 1 não permite (só aceita uso via S3), e não traria ganho. Abro mão de ter uma trilha de uso da chave para esse bucket. O skip `CKV_AWS_145` aponta para esta seção.
+
+### 3.3 Logs com SSE-KMS e sem versionamento
+Logs são só de acréscimo e não são editados. Sem versionamento, o ciclo de vida fica simples (90 dias até Glacier, expira em `log_retention_days`, padrão 365).
+
+### 3.4 TLS obrigatório nos dois buckets
+Policy de `Deny` quando `aws:SecureTransport` é falso. Herdado do Case 1.
+
+### 3.5 Bucket policy do front-end será estendida na Fase 5
+Um bucket só tem uma bucket policy. Na Fase 5 a permissão do CloudFront (OAC) será combinada com a policy de TLS usando `source_policy_documents`.
+
+### 3.6 Sem replicação entre regiões, sem access logging, sem notificações de evento
+Por custo e por não terem consumidor neste projeto. Os skips `CKV_AWS_144`, `CKV_AWS_18` e `CKV2_AWS_62` apontam para esta seção.
+
+## 4. Mudanças em relação ao Seguros Horizonte
+| Item | Case 1 | Case 2 |
+|---|---|---|
+| Chaves KMS | `rds`, `s3` | `dynamodb`, `s3` |
+| ViaService | `rds`, `s3` | `dynamodb`, `s3` |
+| Buckets | app-data, backups, logs | frontend, logs |
+| Criptografia do bucket público | KMS | SSE-S3 |
+| Retenção de logs | 2555 dias (7 anos) | 365 dias (padrão) |
+| Padrão de `environment` | `prod` | `dev` |
+| Módulos networking, ec2, rds | usados | não usados |
+
+## 5. Serviços que não usei
+- **RDS/Aurora:** acesso por chave e escala imprevisível combinam com DynamoDB; abro mão de joins e SQL ad hoc.
+- **ElastiCache:** DynamoDB já responde em milissegundos; DAX seria a opção se a latência de leitura virasse problema.
+- **EC2/ALB/Auto Scaling, ECS/EKS:** sem servidor para manter; abro mão de controle do runtime e aceito cold start.
+- **Step Functions e Kinesis:** o fluxo de pedido é simples e SQS/EventBridge bastam.
