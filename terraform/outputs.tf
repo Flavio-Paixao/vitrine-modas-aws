@@ -36,3 +36,13 @@ output "pedidos_table_name" {
   description = "Nome da tabela de pedidos"
   value       = module.dynamodb.pedidos_table_name
 }
+
+output "cognito_user_pool_id" {
+  description = "ID do user pool do Cognito"
+  value       = module.cognito.user_pool_id
+}
+
+output "cognito_user_pool_client_id" {
+  description = "ID do app client do front-end"
+  value       = module.cognito.user_pool_client_id
+}

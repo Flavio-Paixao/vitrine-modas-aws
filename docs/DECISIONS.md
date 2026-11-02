@@ -7,8 +7,9 @@ Projeto de estudo, validado com `terraform validate` e `terraform plan`. Nada fo
 2. KMS
 3. S3
 4. DynamoDB
-5. Mudanças em relação ao Seguros Horizonte
-6. Serviços que não usei (vai crescendo a cada fase)
+5. Cognito
+6. Mudanças em relação ao Seguros Horizonte
+7. Serviços que não usei (vai crescendo a cada fase)
 
 ## 1. Base do projeto
 
@@ -86,7 +87,30 @@ As tabelas usam a chave `dynamodb` criada na Fase 0 (em vez da chave gerenciada 
 ### 4.7 Sem TTL e sem proteção contra exclusão
 Não há dado que expire neste desenho, e o projeto não é implantado. Em produção, eu ligaria a proteção contra exclusão.
 
-## 5. Mudanças em relação ao Seguros Horizonte
+## 5. Cognito
+
+### 5.1 Cognito User Pool em vez de um sistema de login próprio
+Cadastro, verificação de e-mail, recuperação de senha e emissão de tokens (JWT) são problemas resolvidos e sensíveis a segurança. Com o Cognito eu não guardo senha nem escrevo esse código, e o API Gateway valida o token direto (Fase 3). Abro mão de controle total da experiência de login e fico acoplado ao serviço da AWS.
+
+### 5.2 Login com e-mail, verificado, sem diferenciar maiúsculas
+O e-mail é o identificador do cliente. A verificação evita cadastro com e-mail de outra pessoa, e `case_sensitive = false` evita duas contas para `Ana@x.com` e `ana@x.com`.
+
+### 5.3 Senha de 12+ caracteres e MFA por app autenticador, opcional
+A política exige maiúscula, minúscula, número e símbolo. O MFA usa TOTP (app autenticador), e não SMS, porque SMS tem custo por mensagem e é mais fraco contra troca de chip. Fica opcional (`OPTIONAL`) para não atrapalhar a compra; em uma loja real, eu exigiria MFA da equipe (grupo `admin`).
+
+### 5.4 App client público, sem segredo, com fluxo SRP
+O front-end roda no navegador e não consegue guardar um segredo. O fluxo SRP evita enviar a senha em texto puro, e `prevent_user_existence_errors` impede descobrir quais e-mails estão cadastrados. Tokens de acesso e de identificação duram 60 minutos e o refresh dura 30 dias.
+
+### 5.5 Sem Hosted UI, sem domínio e sem login social por enquanto
+O front-end fará o login pela API do Cognito (SDK). Hosted UI e provedores como Google exigiriam domínio e URLs de retorno, e não são necessários para mostrar a arquitetura. É uma evolução possível.
+
+### 5.6 Dois grupos: `clientes` e `admin`
+A Lambda da Fase 3 usará o grupo (claim `cognito:groups` no token) para decidir quem altera catálogo e estoque. É autorização simples; o desenho não substitui uma política de permissões mais fina.
+
+### 5.7 Sem recursos de segurança avançada
+Detecção de credenciais vazadas e de login suspeito (plano de segurança avançada do Cognito) tem custo adicional e fica fora do escopo de estudo.
+
+## 6. Mudanças em relação ao Seguros Horizonte
 | Item | Case 1 | Case 2 |
 |---|---|---|
 | Chaves KMS | `rds`, `s3` | `dynamodb`, `s3` |
@@ -97,7 +121,7 @@ Não há dado que expire neste desenho, e o projeto não é implantado. Em produ
 | Padrão de `environment` | `prod` | `dev` |
 | Módulos networking, ec2, rds | usados | não usados |
 
-## 6. Serviços que não usei
+## 7. Serviços que não usei
 - **RDS/Aurora:** acesso por chave e escala imprevisível combinam com DynamoDB; abro mão de joins e SQL ad hoc.
 - **ElastiCache:** DynamoDB já responde em milissegundos; DAX seria a opção se a latência de leitura virasse problema.
 - **EC2/ALB/Auto Scaling, ECS/EKS:** sem servidor para manter; abro mão de controle do runtime e aceito cold start.
