@@ -61,3 +61,8 @@ output "site_url" {
   description = "Endereço do site (CloudFront)"
   value       = "https://${module.cloudfront.domain_name}"
 }
+
+output "dashboard_name" {
+  description = "Dashboard do CloudWatch"
+  value       = module.observabilidade.dashboard_name
+}
