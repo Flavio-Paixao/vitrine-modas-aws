@@ -28,3 +28,14 @@ module "dynamodb" {
   project_name = var.project_name
   kms_key_arn  = module.kms.dynamodb_key_arn
 }
+
+# ==========================================
+# Fase 2 (VTM-6): Autenticação
+# ==========================================
+
+# Cognito: user pool, app client e grupos
+module "cognito" {
+  source = "./modules/cognito"
+
+  project_name = var.project_name
+}
