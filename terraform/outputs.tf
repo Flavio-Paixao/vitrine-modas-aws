@@ -56,3 +56,8 @@ output "alertas_topic_arn" {
   description = "ARN do tópico SNS de alertas"
   value       = module.eventos.alertas_topic_arn
 }
+
+output "site_url" {
+  description = "Endereço do site (CloudFront)"
+  value       = "https://${module.cloudfront.domain_name}"
+}

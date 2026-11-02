@@ -20,3 +20,8 @@ output "bucket_arns" {
     aws_s3_bucket.logs.arn,
   ]
 }
+
+output "frontend_bucket_regional_domain_name" {
+  description = "Domínio regional do bucket do front-end (origem do CloudFront)"
+  value       = aws_s3_bucket.frontend.bucket_regional_domain_name
+}

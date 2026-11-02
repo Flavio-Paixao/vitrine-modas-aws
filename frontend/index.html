@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vitrine Modas</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; color: #1f2933; background: #faf7f5; }
+    header { padding: 1.5rem 1rem; background: #3b2f2f; color: #fff; }
+    main { max-width: 48rem; margin: 0 auto; padding: 1rem; }
+    .aviso { font-size: .9rem; color: #52606d; }
+    ul { list-style: none; padding: 0; }
+    li { background: #fff; border: 1px solid #e4e7eb; border-radius: .5rem; padding: .75rem 1rem; margin-bottom: .5rem; }
+  </style>
+</head>
+<body>
+  <header><h1>Vitrine Modas</h1></header>
+  <main>
+    <p class="aviso">Projeto de estudo de arquitetura serverless na AWS. Esta página é só uma demonstração do front-end estático.</p>
+    <h2>Catálogo</h2>
+    <p id="status">Carregando…</p>
+    <ul id="lista"></ul>
+  </main>
+  <script>
+    // O catálogo vem da própria API, no mesmo domínio (/api/*), então não há CORS.
+    fetch("/api/produtos")
+      .then((resposta) => {
+        if (!resposta.ok) throw new Error("HTTP " + resposta.status);
+        return resposta.json();
+      })
+      .then((dados) => {
+        const lista = document.getElementById("lista");
+        const itens = dados.itens || [];
+        document.getElementById("status").textContent = itens.length ? "" : "Nenhum produto cadastrado.";
+        itens.forEach((produto) => {
+          const li = document.createElement("li");
+          // textContent evita injetar HTML vindo dos dados
+          li.textContent = produto.nome + " — R$ " + Number(produto.preco).toFixed(2);
+          lista.appendChild(li);
+        });
+      })
+      .catch(() => {
+        document.getElementById("status").textContent = "Não foi possível carregar o catálogo.";
+      });
+  </script>
+</body>
+</html>

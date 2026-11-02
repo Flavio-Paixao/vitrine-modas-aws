@@ -10,8 +10,9 @@ Projeto de estudo, validado com `terraform validate` e `terraform plan`. Nada fo
 5. Cognito
 6. Lambdas e API Gateway
 7. Eventos: EventBridge, SQS e SNS
-8. Mudanças em relação ao Seguros Horizonte
-9. Serviços que não usei
+8. Borda: CloudFront e S3
+9. Mudanças em relação ao Seguros Horizonte
+10. Serviços que não usei
 
 ## 1. Base do projeto
 
@@ -175,7 +176,33 @@ O alerta de estoque baixo vai para um tópico SNS. A assinatura por e-mail só e
 ### 7.8 O que o "processamento" do pedido é e não é
 Nesta fase o processador apenas confirma o pedido. Não há pagamento, nota fiscal nem envio: o objetivo é mostrar o desenho assíncrono (evento, fila, consumidor idempotente, DLQ), e não simular um fluxo comercial completo.
 
-## 8. Mudanças em relação ao Seguros Horizonte
+## 8. Borda: CloudFront e S3
+
+### 8.1 Um único domínio do CloudFront para o site e para a API
+O site (S3) e a API (API Gateway, em `/api/*`) ficam no mesmo endereço. Vantagens: o navegador trata como mesma origem, então não preciso configurar CORS, e o CloudFront fica na frente de tudo (HTTPS obrigatório, cabeçalhos de segurança). Abro mão de poder trocar o front-end e a API de lugar de forma independente.
+
+### 8.2 `/api/*` sem cache e repassando o token
+A API não é cacheada pelo CloudFront (`Managed-CachingDisabled`), porque respostas dependem do usuário e do estoque. A política `Managed-AllViewerExceptHostHeader` repassa os cabeçalhos do cliente, inclusive `Authorization` (o token do Cognito), mas não o `Host`: o API Gateway rejeita um `Host` que não seja o dele. Os métodos de escrita (PUT, POST) são permitidos nesse caminho.
+
+### 8.3 Bucket privado, acesso só por OAC, uma policy combinada
+O bucket do front-end não tem acesso público. Uma Origin Access Control (OAC, que substitui a antiga OAI) faz o CloudFront assinar as requisições, e a policy do bucket só libera `s3:GetObject` para o serviço CloudFront e só para esta distribuição (`AWS:SourceArn`). Como um bucket tem uma policy só, ela é combinada com a de TLS obrigatório via `source_policy_documents`.
+
+### 8.4 O que ficou de fora da distribuição (skips do checkov)
+Sem domínio próprio nem certificado do ACM, a distribuição usa o certificado padrão `*.cloudfront.net`, que não permite escolher a versão mínima de TLS (`CKV_AWS_174`, `CKV2_AWS_42`). Sem WAF (`CKV_AWS_68`, `CKV2_AWS_47`: custo, e é a primeira coisa que eu adicionaria em produção), sem access log do CloudFront (`CKV_AWS_86`: exigiria um bucket com ACLs, que conflita com o bloqueio de acesso público do Case), sem failover de origem (`CKV_AWS_310`) e sem restrição geográfica (`CKV_AWS_374`). Cabeçalhos de segurança estão ligados pela política gerenciada `Managed-SecurityHeadersPolicy`.
+
+### 8.5 Classe de preço `PriceClass_All`
+O público é brasileiro, e as classes mais baratas (`PriceClass_100` e `200`) não incluem a América do Sul. Pago mais por requisição em troca de latência menor para o Brasil. Não medi essa diferença; a escolha é por desenho.
+
+### 8.6 Sem página de erro que cai em `index.html`
+Um front-end de página única costuma redirecionar 403/404 para `index.html`. Aqui isso também valeria para a API (erros 403 e 404 da Lambda virariam uma página HTML com status 200). Por isso não configurei esse redirecionamento. Abro mão de rotas do navegador sem arquivo correspondente.
+
+### 8.7 Políticas gerenciadas buscadas pelo nome
+As políticas de cache e de cabeçalhos são lidas pelo nome (`data` sources), e não com IDs copiados. O `plan` consulta a AWS para isso, então precisa de credenciais válidas.
+
+### 8.8 A página inicial é uma demonstração
+O `index.html` listando o catálogo sai do Terraform (`aws_s3_object`) para o projeto ser completo. Num projeto real, o deploy do front-end seria um pipeline próprio, separado da infraestrutura. Nada disso foi implantado.
+
+## 9. Mudanças em relação ao Seguros Horizonte
 
 | Item | Case 1 | Case 2 |
 |---|---|---|
@@ -189,7 +216,7 @@ Nesta fase o processador apenas confirma o pedido. Não há pagamento, nota fisc
 | CI | fmt, validate, tflint, checkov | + testes Python (pytest com moto) |
 | Módulos networking, ec2, rds | usados | não usados |
 
-## 9. Serviços que não usei
+## 10. Serviços que não usei
 
 - **RDS/Aurora:** acesso por chave e escala imprevisível combinam com DynamoDB; abro mão de joins e SQL ad hoc.
 - **ElastiCache:** DynamoDB já responde em milissegundos; DAX seria a opção se a latência de leitura virasse problema.
@@ -197,4 +224,7 @@ Nesta fase o processador apenas confirma o pedido. Não há pagamento, nota fisc
 - **Step Functions:** o fluxo de pedido é simples e SQS/EventBridge bastam; entraria se houvesse várias etapas com compensação.
 - **SQS FIFO e Kinesis:** não preciso de ordem estrita nem de streaming de alto volume; a fila padrão com consumidor idempotente basta (DECISIONS 7.3).
 - **EventBridge Pipes:** faria a ponte stream para barramento sem código, mas a regra de negócio fica mais clara na Lambda (DECISIONS 7.2).
+- **Route 53 e ACM:** sem domínio próprio, o site usa o endereço `*.cloudfront.net` (DECISIONS 8.4).
+- **AWS WAF:** custo fora do escopo de estudo; seria a primeira proteção a adicionar em produção (DECISIONS 8.4).
+- **S3 website hosting:** exigiria bucket público; o CloudFront com OAC mantém o bucket privado (DECISIONS 8.3).
 - **HTTP API do API Gateway:** mais barata e simples, mas sem authorizer Cognito nativo nem limites por método (DECISIONS 6.7).
